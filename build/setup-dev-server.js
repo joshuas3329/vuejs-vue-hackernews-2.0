@@ -1,8 +1,7 @@
 const fs = require('fs')
 const path = require('path')
-const MFS = require('memory-fs')
+const { createFsFromVolume, Volume } = require('memfs')
 const webpack = require('webpack')
-const chokidar = require('chokidar')
 const clientConfig = require('./webpack.client.config')
 const serverConfig = require('./webpack.server.config')
 
@@ -31,10 +30,12 @@ module.exports = function setupDevServer (app, templatePath, cb) {
 
   // read template from disk and watch
   template = fs.readFileSync(templatePath, 'utf-8')
-  chokidar.watch(templatePath).on('change', () => {
-    template = fs.readFileSync(templatePath, 'utf-8')
-    console.log('index.html template updated.')
-    update()
+  import('chokidar').then(({ watch }) => {
+    watch(templatePath).on('change', () => {
+      template = fs.readFileSync(templatePath, 'utf-8')
+      console.log('index.html template updated.')
+      update()
+    })
   })
 
   // modify client config to work with hot middleware
@@ -49,16 +50,16 @@ module.exports = function setupDevServer (app, templatePath, cb) {
   const clientCompiler = webpack(clientConfig)
   const devMiddleware = require('webpack-dev-middleware')(clientCompiler, {
     publicPath: clientConfig.output.publicPath,
-    noInfo: true
+    stats: 'errors-warnings'
   })
   app.use(devMiddleware)
-  clientCompiler.plugin('done', stats => {
+  clientCompiler.hooks.done.tap('vue-hn-client', stats => {
     stats = stats.toJson()
     stats.errors.forEach(err => console.error(err))
     stats.warnings.forEach(err => console.warn(err))
     if (stats.errors.length) return
     clientManifest = JSON.parse(readFile(
-      devMiddleware.fileSystem,
+      devMiddleware.context.outputFileSystem,
       'vue-ssr-client-manifest.json'
     ))
     update()
@@ -69,7 +70,8 @@ module.exports = function setupDevServer (app, templatePath, cb) {
 
   // watch and update server renderer
   const serverCompiler = webpack(serverConfig)
-  const mfs = new MFS()
+  const mfs = createFsFromVolume(new Volume())
+  mfs.join = path.join.bind(path)
   serverCompiler.outputFileSystem = mfs
   serverCompiler.watch({}, (err, stats) => {
     if (err) throw err

@@ -1,6 +1,6 @@
 const fs = require('fs')
 const path = require('path')
-const LRU = require('lru-cache')
+const { LRUCache } = require('lru-cache')
 const express = require('express')
 const favicon = require('serve-favicon')
 const compression = require('compression')
@@ -20,9 +20,9 @@ function createRenderer (bundle, options) {
   // https://github.com/vuejs/vue/blob/dev/packages/vue-server-renderer/README.md#why-use-bundlerenderer
   return createBundleRenderer(bundle, Object.assign(options, {
     // for component caching
-    cache: LRU({
+    cache: new LRUCache({
       max: 1000,
-      maxAge: 1000 * 60 * 15
+      ttl: 1000 * 60 * 15
     }),
     // this is only needed when vue-server-renderer is npm-linked
     basedir: resolve('./dist'),
@@ -112,7 +112,7 @@ function render (req, res) {
   })
 }
 
-app.get('*', isProd ? render : (req, res) => {
+app.get(/.*/, isProd ? render : (req, res) => {
   readyPromise.then(() => render(req, res))
 })
 
