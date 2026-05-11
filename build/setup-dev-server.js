@@ -1,14 +1,14 @@
 const fs = require('fs')
 const path = require('path')
-const MFS = require('memory-fs')
+const { createFsFromVolume, Volume } = require('memfs')
 const webpack = require('webpack')
 const chokidar = require('chokidar')
 const clientConfig = require('./webpack.client.config')
 const serverConfig = require('./webpack.server.config')
 
-const readFile = (fs, file) => {
+const readFile = (outputFileSystem, file) => {
   try {
-    return fs.readFileSync(path.join(clientConfig.output.path, file), 'utf-8')
+    return outputFileSystem.readFileSync(path.join(clientConfig.output.path, file), 'utf-8')
   } catch (e) {}
 }
 
@@ -49,16 +49,17 @@ module.exports = function setupDevServer (app, templatePath, cb) {
   const clientCompiler = webpack(clientConfig)
   const devMiddleware = require('webpack-dev-middleware')(clientCompiler, {
     publicPath: clientConfig.output.publicPath,
-    noInfo: true
+    serverSideRender: true,
+    writeToDisk: false
   })
   app.use(devMiddleware)
-  clientCompiler.plugin('done', stats => {
+  clientCompiler.hooks.done.tap('setup-dev-server', stats => {
     stats = stats.toJson()
     stats.errors.forEach(err => console.error(err))
     stats.warnings.forEach(err => console.warn(err))
     if (stats.errors.length) return
     clientManifest = JSON.parse(readFile(
-      devMiddleware.fileSystem,
+      devMiddleware.context.outputFileSystem,
       'vue-ssr-client-manifest.json'
     ))
     update()
@@ -69,7 +70,8 @@ module.exports = function setupDevServer (app, templatePath, cb) {
 
   // watch and update server renderer
   const serverCompiler = webpack(serverConfig)
-  const mfs = new MFS()
+  const mfs = createFsFromVolume(new Volume())
+  mfs.join = path.join.bind(path)
   serverCompiler.outputFileSystem = mfs
   serverCompiler.watch({}, (err, stats) => {
     if (err) throw err
