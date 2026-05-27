@@ -1,5 +1,6 @@
-import Firebase from 'firebase'
-import LRU from 'lru-cache'
+import { initializeApp, getApps } from 'firebase/app'
+import { getDatabase, ref, onValue } from 'firebase/database'
+import { LRUCache } from 'lru-cache'
 
 export function createAPI ({ config, version }) {
   let api
@@ -8,21 +9,28 @@ export function createAPI ({ config, version }) {
   if (process.__API__) {
     api = process.__API__
   } else {
-    Firebase.initializeApp(config)
-    api = process.__API__ = Firebase.database().ref(version)
+    let app
+    if (getApps().length === 0) {
+      app = initializeApp(config)
+    } else {
+      app = getApps()[0]
+    }
+    const db = getDatabase(app)
+    api = process.__API__ = ref(db, version)
 
     api.onServer = true
 
     // fetched item cache
-    api.cachedItems = LRU({
+    api.cachedItems = new LRUCache({
       max: 1000,
-      maxAge: 1000 * 60 * 15 // 15 min cache
+      ttl: 1000 * 60 * 15 // 15 min cache
     })
 
     // cache the latest story ids
     api.cachedIds = {}
     ;['top', 'new', 'show', 'ask', 'job'].forEach(type => {
-      api.child(`${type}stories`).on('value', snapshot => {
+      const storyRef = ref(db, `${version}/${type}stories`)
+      onValue(storyRef, snapshot => {
         api.cachedIds[type] = snapshot.val()
       })
     })

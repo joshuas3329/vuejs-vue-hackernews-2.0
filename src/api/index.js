@@ -1,5 +1,6 @@
 // this is aliased in webpack config based on server/client build
 import { createAPI } from 'create-api'
+import { child, get, onValue } from 'firebase/database'
 
 const logRequests = !!process.env.DEBUG_API
 
@@ -21,22 +22,21 @@ function warmCache () {
   setTimeout(warmCache, 1000 * 60 * 15)
 }
 
-function fetch (child) {
-  logRequests && console.log(`fetching ${child}...`)
+function fetch (childPath) {
+  logRequests && console.log(`fetching ${childPath}...`)
   const cache = api.cachedItems
-  if (cache && cache.has(child)) {
-    logRequests && console.log(`cache hit for ${child}.`)
-    return Promise.resolve(cache.get(child))
+  if (cache && cache.has(childPath)) {
+    logRequests && console.log(`cache hit for ${childPath}.`)
+    return Promise.resolve(cache.get(childPath))
   } else {
-    return new Promise((resolve, reject) => {
-      api.child(child).once('value', snapshot => {
-        const val = snapshot.val()
-        // mark the timestamp when this item is cached
-        if (val) val.__lastUpdated = Date.now()
-        cache && cache.set(child, val)
-        logRequests && console.log(`fetched ${child}.`)
-        resolve(val)
-      }, reject)
+    const childRef = child(api, childPath)
+    return get(childRef).then(snapshot => {
+      const val = snapshot.val()
+      // mark the timestamp when this item is cached
+      if (val) val.__lastUpdated = Date.now()
+      cache && cache.set(childPath, val)
+      logRequests && console.log(`fetched ${childPath}.`)
+      return val
     })
   }
 }
@@ -61,7 +61,7 @@ export function fetchUser (id) {
 
 export function watchList (type, cb) {
   let first = true
-  const ref = api.child(`${type}stories`)
+  const childRef = child(api, `${type}stories`)
   const handler = snapshot => {
     if (first) {
       first = false
@@ -69,8 +69,8 @@ export function watchList (type, cb) {
       cb(snapshot.val())
     }
   }
-  ref.on('value', handler)
+  const unsubscribe = onValue(childRef, handler)
   return () => {
-    ref.off('value', handler)
+    unsubscribe()
   }
 }
